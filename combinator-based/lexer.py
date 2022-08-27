@@ -9,42 +9,7 @@ from dataclasses import dataclass
 from typing import *
 import re
 
-
-@dataclass
-class Source:
-    filename: str
-    text: str
-
-
-@dataclass
-class Location:
-    source: Source
-    begin: int
-    end: int
-
-    def __str__(self):
-        return f"{self.source.filename}:{self.begin}..{self.end}"
-
-    def length(self):
-        return self.end - self.begin
-
-    def join(locations):
-        locations = list(locations)
-        return Location(
-            source=locations[0].source,
-            begin=min(loc.begin for loc in locations),
-            end=max(loc.end for loc in locations),
-        )
-
-
-@dataclass
-class Token:
-    kind: str
-    text: str
-    location: Location
-
-    def __str__(self):
-        return f"{self.kind}({repr(self.text)})@{self.location}"
+from lang import *
 
 
 class CharCursor:
@@ -312,26 +277,13 @@ string = StringLiteral()
 whitespace = Regex("whitespace", r"[ \t\n\r]+")
 unknown = Regex("unknown", r".")
 
-fn = Join("function", Sequence("fn",
-                               [
-                                   Commit("fn start", Sequence("fn start", [
-                                       Exactly("fn", "fn"), whitespace, identifier])),
-                                   Exactly("(", "("),
-                                   Exactly(")", ")"),
-                               ]
-                               ))
+fn = Exactly("fn", "fn")
+let = Exactly("let", "let")
+
 
 comment = Regex("comment", r"#[^\n]*\n?")
 
-items = [fn, number, identifier, string,
+items = [let, fn, number, identifier, string,
          comment, operator, whitespace, unknown]
 synced_items = Synchronized("items", [(item, item) for item in items])
-main = Repeat("main", synced_items)
-
-cursor = CharCursor(Source("test.txt", 'fn x(+ '))
-lexed = main.lex(cursor)
-for token in lexed.tokens:
-    print(token)
-
-for error in lexed.errors:
-    print(error)
+lang_lexer = Repeat("main", synced_items)
