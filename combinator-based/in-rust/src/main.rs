@@ -17,9 +17,24 @@ struct Token<T> {
     children: Vec<Token<T>>,
 }
 
-struct Parsed<InputToken, OutputToken, Error, C: Cursor<InputToken>> {
+#[derive(Debug)]
+struct Error<E> {
+    message: String,
+    error: Option<E>,
+}
+
+impl<E> Error<E> {
+    fn new(message: String, error: Option<E>) -> Error<E> {
+        Error {
+            message: message,
+            error: error,
+        }
+    }
+}
+
+struct Parsed<InputToken, OutputToken, E, C: Cursor<InputToken>> {
     token: Token<OutputToken>,
-    errors: Vec<Error>,
+    errors: Vec<Error<E>>,
     cursor: C,
     is_error: bool,
     is_commited: bool,
@@ -27,7 +42,13 @@ struct Parsed<InputToken, OutputToken, Error, C: Cursor<InputToken>> {
 }
 
 impl<IT, OT, E, C: Cursor<IT>> Parsed<IT, OT, E, C> {
-    fn new(token: Token<OT>, errors: Vec<E>, cursor: C, is_error: bool, is_commited: bool) -> Self {
+    fn new(
+        token: Token<OT>,
+        errors: Vec<Error<E>>,
+        cursor: C,
+        is_error: bool,
+        is_commited: bool,
+    ) -> Self {
         Parsed {
             token,
             errors,
@@ -38,7 +59,7 @@ impl<IT, OT, E, C: Cursor<IT>> Parsed<IT, OT, E, C> {
         }
     }
 
-    fn ok(token: Token<OT>, errors: Vec<E>, cursor: C) -> Self {
+    fn ok(token: Token<OT>, errors: Vec<Error<E>>, cursor: C) -> Self {
         Parsed {
             token,
             errors,
@@ -49,7 +70,7 @@ impl<IT, OT, E, C: Cursor<IT>> Parsed<IT, OT, E, C> {
         }
     }
 
-    fn err(token: Token<OT>, errors: Vec<E>, cursor: C) -> Self {
+    fn err(token: Token<OT>, errors: Vec<Error<E>>, cursor: C) -> Self {
         Parsed {
             token,
             errors,
@@ -71,6 +92,12 @@ trait Parser<InputToken, OutputToken, Error, C: Cursor<InputToken>> {
 
 struct Sequence<InputToken, OutputToken, Error, C: Cursor<InputToken>> {
     parsers: Vec<Box<dyn Parser<InputToken, OutputToken, Error, C>>>,
+}
+
+impl<IT, OT, E, C: Cursor<IT>> Sequence<IT, OT, E, C> {
+    fn new(parsers: Vec<Box<dyn Parser<IT, OT, E, C>>>) -> Self {
+        Sequence { parsers }
+    }
 }
 
 impl<IT, OT, E, C: Cursor<IT>> Parser<IT, OT, E, C> for Sequence<IT, OT, E, C> {
@@ -141,6 +168,99 @@ impl<IT, OT, E, C: Cursor<IT>> Parser<IT, OT, E, C> for Flatten<IT, OT, E, C> {
     }
 }
 
+struct Repeat<IT, OT, E, C: Cursor<IT>> {
+    min: u32,
+    parser: Box<dyn Parser<IT, OT, E, C>>,
+}
+
+impl<IT, OT, E, C: Cursor<IT>> Repeat<IT, OT, E, C> {
+    fn new(min: u32, parser: Box<dyn Parser<IT, OT, E, C>>) -> Self {
+        Repeat { min, parser }
+    }
+}
+
+impl<IT, OT, E, C: Cursor<IT>> Parser<IT, OT, E, C> for Repeat<IT, OT, E, C> {
+    fn parse(&self, cursor: C) -> Parsed<IT, OT, E, C> {
+        let mut cursor = cursor;
+        let mut token = Token {
+            content: Vec::new(),
+            children: Vec::new(),
+        };
+        let mut errors = Vec::new();
+        let mut count = 0;
+        loop {
+            let parsed = self.parser.parse(cursor);
+            let err = parsed.is_err();
+            cursor = parsed.cursor;
+            token.content.extend(parsed.token.content);
+            token.children.extend(parsed.token.children);
+            if err {
+                if count < self.min {
+                    errors.extend(parsed.errors);
+                    return Parsed::err(token, errors, cursor);
+                } else {
+                    return Parsed::ok(token, errors, cursor);
+                }
+            }
+            errors.extend(parsed.errors);
+            count += 1;
+        }
+    }
+}
+
+struct Commit<IT, OT, E, C: Cursor<IT>> {
+    parser: Box<dyn Parser<IT, OT, E, C>>,
+}
+
+impl<IT, OT, E, C: Cursor<IT>> Commit<IT, OT, E, C> {
+    fn new(parser: Box<dyn Parser<IT, OT, E, C>>) -> Self {
+        Commit { parser }
+    }
+}
+
+impl<IT, OT, E, C: Cursor<IT>> Parser<IT, OT, E, C> for Commit<IT, OT, E, C> {
+    fn parse(&self, cursor: C) -> Parsed<IT, OT, E, C> {
+        let mut parsed = self.parser.parse(cursor);
+        if parsed.is_err() {
+            return parsed;
+        } else {
+            parsed.is_commited = true;
+            return parsed;
+        }
+    }
+}
+
+struct AnyOf<IT, OT, E, C: Cursor<IT>> {
+    parsers: Vec<Box<dyn Parser<IT, OT, E, C>>>,
+}
+
+impl<IT, OT, E, C: Cursor<IT>> AnyOf<IT, OT, E, C> {
+    fn new(parsers: Vec<Box<dyn Parser<IT, OT, E, C>>>) -> Self {
+        AnyOf { parsers }
+    }
+}
+
+impl<IT, OT, E, C: Cursor<IT>> Parser<IT, OT, E, C> for AnyOf<IT, OT, E, C> {
+    fn parse(&self, cursor: C) -> Parsed<IT, OT, E, C> {
+        for parser in self.parsers.iter() {
+            let parsed = parser.parse(cursor.clone());
+            if !parsed.is_err() {
+                return parsed;
+            }
+        }
+
+        let token = Token {
+            content: Vec::new(),
+            children: Vec::new(),
+        };
+        return Parsed::err(
+            token,
+            vec![Error::new("No viable alternative".to_owned(), None)],
+            cursor,
+        );
+    }
+}
+
 struct StringCursor {
     text: Rc<String>,
     index: usize,
@@ -206,7 +326,7 @@ impl Parser<String, String, String, StringCursor> for ExpectString {
                     content: vec![],
                     children: Vec::new(),
                 },
-                vec![self.text.clone()],
+                vec![Error::new(format!("Expected '{}'", self.text), None)],
                 cursor,
             );
         }
@@ -243,29 +363,48 @@ macro_rules! expect {
 
 macro_rules! sequence {
     ($($parser:expr),*) => {
-        Box::new(Sequence { parsers: vec![$($parser),*] })
+        Box::new(Sequence::new(vec![$($parser),*]))
     };
 }
 macro_rules! flatten {
     ($parser:expr) => {
         Box::new(Flatten::new($parser))
     };
-    () => {};
+}
+
+macro_rules! any_of {
+    ($($parser:expr),*) => {
+        Box::new(AnyOf::new(vec![$($parser),*]))
+    };
+}
+
+macro_rules! repeat {
+    ($min:expr, $parser:expr) => {
+        Box::new(Repeat::new($min, $parser))
+    };
+}
+
+macro_rules! commit {
+    ($parser:expr) => {
+        Box::new(Commit::new($parser))
+    };
+}
+
+macro_rules! flat {
+    ($($parser:expr),*) => {
+        flatten!(sequence!($($parser),*))
+    };
 }
 
 fn main() {
-    let mut rules = Rules::new();
-    rules.insert("abc".to_string(), expect!("abc"));
-    let rules = Rc::new(RefCell::new(rules));
-    let a_rule = Box::new(Rule::new("abc".to_string(), rules.clone()));
-    {
-        let mut rules = rules.borrow_mut();
-        rules.insert("a".to_string(), sequence!(a_rule, expect!("def")));
-    }
-    let top_a = Box::new(Rule::new("a".to_string(), rules.clone()));
+    let parser = any_of!(
+        flat!(commit!(flat!(expect!("a"), expect!("b"))), expect!("c")),
+        expect!("abx")
+    );
 
-    let cursor = StringCursor::new(Rc::new("abcdef".to_string()));
-    let parsed = flatten!(top_a).parse(cursor);
+    let text = "abxdef".to_owned();
+    let cursor = StringCursor::new(Rc::new(text));
+    let parsed = parser.parse(cursor);
     println!("{:?}", parsed.token);
     println!("{:?}", parsed.errors);
 }
