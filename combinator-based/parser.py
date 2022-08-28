@@ -135,6 +135,7 @@ class Sequence(Parser):
             result.cursor = parsed.cursor
             if parsed.is_err():
                 break
+        result.is_error = result.is_err()
         result.commited = False
         return result
 
