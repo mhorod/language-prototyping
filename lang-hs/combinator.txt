@@ -1,0 +1,16 @@
+# Example of combinator made from S, K, I, that calcultes floor(n/3)
+# It's worth noting that this example compiles only because there is no typechecking
+
+def S = fn x y z => (x z) (y z)
+def K = fn x y => x
+def I = fn x => x
+
+def C = S ( K ( S ( K ( S ( K ( S S ( K ( K ( S ( K K ) K ) ) ) ) ) ) ) ( S ( K ( S ( K ( S S ( K ( S ( S ( S ( K ( S ( K ( S ( K ( S ( K ( S S ( K K ) ) ) K ) ) S ) ) ) ) ( S ( K ( S ( K ( S ( K ( S ( K ( S S ( K K ) ) ) K ) ) S ) ) ( S ( I ) ) ) ) K ) ) ( I ) ) ( I ) ) ) ) ) K ) ) ) ) ) ( S ( K ( S S ( K ( S ( K ( S ( K ( S ( I ) ) ) K ) ) ( S ( K ( S ( K ( S ( K ( S ( S ( K S ) ( S ( K ( S ( K ( S ( K ( S ( K ( S S ( K K ) ) ) K ) ) S ) ) ) ) ( S ( K ( S ( K ( S ( K ( S ( K ( S S ( K K ) ) ) K ) ) S ) ) ( S ( I ) ) ) ) K ) ) ) ) ) K ) ) K ) ) ) ) ) ) ) K )
+
+def inc = fn x => x + 1
+
+def zero = fn f x => x
+def succ = fn n f x => f (n f x)
+def nth = fn n => if n == 0 then zero else succ (nth (n - 1))
+
+eval C (nth 174661) inc 0 # outputs 58220 = 174661 / 3

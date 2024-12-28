@@ -1,0 +1,18 @@
+# Simple example of the language syntax
+
+# math operations
+eval 1 + 2 * 8 - 3 # 14
+eval 2 == 2 # 1
+eval 2 == 3 # 0
+
+# recursion
+def fac = fn n => if n == 0 then 1 else n * fac (n - 1)
+eval fac 5 # 120
+
+# church numerals
+def zero = fn f x => x
+def succ = fn n f x => f (n f x)
+def nth = fn n => if n == 0 then zero else succ (nth (n - 1))
+
+def add = fn x y => x + y
+eval nth 21 (add 2) 0 # 42
